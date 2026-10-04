@@ -42,6 +42,12 @@ def make_handler(service: Service, static_dir: str):
         def _identity(self) -> Tuple[str, str]:
             return self.headers.get("X-Actor", ""), self.headers.get("X-Role", "")
 
+        def _op_id(self, body: Optional[Dict[str, Any]] = None) -> Optional[str]:
+            op_id = (self.headers.get("X-Op-Id", "") or "").strip() or None
+            if op_id is None and body and isinstance(body, dict):
+                op_id = body.get("op_id")
+            return op_id
+
         def _body(self) -> Dict[str, Any]:
             length = int(self.headers.get("Content-Length", "0") or 0)
             if length <= 0:
@@ -98,6 +104,10 @@ def make_handler(service: Service, static_dir: str):
                     actor, role = self._identity()
                     del actor
                     self._json(200, {"events": service.audit(role)})
+                elif path == "/api/events":
+                    actor, role = self._identity()
+                    del actor
+                    self._json(200, {"events": service.events(role)})
                 else:
                     self._json(404, {"error": "not_found"})
             except Exception as exc:
@@ -109,16 +119,17 @@ def make_handler(service: Service, static_dir: str):
                 actor, role = self._identity()
                 body = self._body()
                 if path == "/api/items":
-                    self._json(201, service.create_item(body, actor, role))
+                    self._json(201, service.create_item(body, actor, role, self._op_id(body)))
                 elif path.startswith("/api/items/") and path.endswith("/records"):
                     item_id = int(path.split("/")[3])
-                    self._json(201, service.add_record(item_id, body, actor, role))
+                    self._json(201, service.add_record(item_id, body, actor, role,
+                                                        self._op_id(body)))
                 elif path.startswith("/api/items/") and path.endswith("/transition"):
                     item_id = int(path.split("/")[3])
                     target = body.get("target")
                     expected = body.get("expected_version")
                     self._json(200, service.transition(
-                        item_id, target, expected, actor, role))
+                        item_id, target, expected, actor, role, self._op_id(body)))
                 else:
                     self._json(404, {"error": "not_found"})
             except Exception as exc:
